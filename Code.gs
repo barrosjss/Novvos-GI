@@ -43,10 +43,26 @@ function actualizarInventario() {
     return;
   }
   
-  // Obtener inventario actual
+  // Obtener datos actuales del inventario
   const datosInventario = hojaInventario.getRange(2, 1, hojaInventario.getLastRow() - 1, 5).getValues();
   
-  // Actualizar inventario
+  // Primero, actualizar el estado de TODOS los ingredientes
+  for (let i = 0; i < datosInventario.length; i++) {
+    const stockActual = datosInventario[i][1];
+    const stockMinimo = datosInventario[i][3];
+    let estado = "✅ OK";
+    
+    if (stockActual <= stockMinimo) {
+      estado = "🔴 COMPRAR";
+    } else if (stockActual <= stockMinimo * 1.5) {
+      estado = "⚠️ Bajo";
+    }
+    
+    // Actualizar solo la columna de estado (columna 5)
+    hojaInventario.getRange(i + 2, 5).setValue(estado);
+  }
+  
+  // Luego, procesar la venta actual
   ingredientesPlato.forEach(ingrediente => {
     const nombreIngrediente = ingrediente[1];
     const cantidadPorPorcion = ingrediente[2];
@@ -61,7 +77,7 @@ function actualizarInventario() {
         // Actualizar stock
         hojaInventario.getRange(i + 2, 2).setValue(nuevoStock);
         
-        // Actualizar estado
+        // Actualizar estado del ingrediente modificado
         const stockMinimo = datosInventario[i][3];
         let estado = "✅ OK";
         if (nuevoStock <= stockMinimo) {
@@ -142,7 +158,8 @@ function onOpen() {
   ui.createMenu('🍕 Gestión de Inventario')
     .addItem('📦 Actualizar Inventario', 'actualizarInventario')
     .addItem('🛒 Generar Lista de Compras', 'generarListaCompras')
-    .addItem('📊 Reporte de Inventario', 'reporteInventario')
+    .addItem('� Enviar por WhatsApp', 'enviarListaComprasWhatsApp')
+    .addItem('�📊 Reporte de Inventario', 'reporteInventario')
     .addSeparator()
     .addItem('ℹ️ Ayuda', 'mostrarAyuda')
     .addToUi();
@@ -178,6 +195,79 @@ function reporteInventario() {
                    `¡Todo el inventario está en buen estado! 🎉`);
   
   SpreadsheetApp.getUi().alert(mensaje);
+}
+
+/**
+ * Envía la lista de compras por WhatsApp
+ */
+function enviarListaComprasWhatsApp() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const hojaInventario = ss.getSheetByName("Inventario");
+  
+  if (!hojaInventario) {
+    SpreadsheetApp.getUi().alert('Error: No se encontró la hoja "Inventario"');
+    return;
+  }
+  
+  // Obtener datos del inventario
+  const datosInventario = hojaInventario.getRange(2, 1, hojaInventario.getLastRow() - 1, 5).getValues();
+  
+  // Filtrar solo los que necesitan comprarse
+  const compras = [];
+  const criticos = [];
+  
+  datosInventario.forEach(row => {
+    const ingrediente = row[0];
+    const stockActual = row[1];
+    const stockMinimo = row[3];
+    const estado = row[4];
+    
+    if (estado.includes("🔴")) {
+      criticos.push(`• ${ingrediente} (CRÍTICO: Necesita reposición urgente)`);
+    } else if (estado.includes("⚠️")) {
+      compras.push(`• ${ingrediente} (Bajo stock)`);
+    }
+  });
+  
+  // Crear mensaje
+  let mensaje = "📋 *LISTA DE COMPRAS*\n\n";
+  
+  if (criticos.length > 0) {
+    mensaje += "🚨 *ARTÍCULOS CRÍTICOS* 🚨\n";
+    mensaje += criticos.join("\n") + "\n\n";
+  }
+  
+  if (compras.length > 0) {
+    mensaje += "⚠️ *ARTÍCULOS BAJOS* ⚠️\n";
+    mensaje += compras.join("\n") + "\n\n";
+  }
+  
+  if (criticos.length === 0 && compras.length === 0) {
+    mensaje += "✅ No hay artículos por comprar en este momento.";
+  } else {
+    mensaje += "📅 Fecha: " + new Date().toLocaleDateString('es-ES');
+  }
+  
+  // Crear enlace de WhatsApp
+  const telefono = ''; // Deja vacío para que el usuario lo complete
+  const enlaceWhatsApp = `https://wa.me/${telefono}?text=${encodeURIComponent(mensaje)}`;
+  
+  // Mostrar diálogo con el enlace
+  const ui = SpreadsheetApp.getUi();
+  const respuesta = ui.alert(
+    '📱 Enviar lista de compras por WhatsApp',
+    '¿Quieres abrir WhatsApp con la lista de compras?\n\n' +
+    'Nota: Si usas WhatsApp Web, asegúrate de estar logueado.\n' +
+    'Si usas el teléfono, escanea el código QR que aparecerá.',
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (respuesta === ui.Button.YES) {
+    // Abrir enlace en una nueva pestaña
+    const html = `<script>window.open('${enlaceWhatsApp}', '_blank'); google.script.host.close();</script>`;
+    const htmlOutput = HtmlService.createHtmlOutput(html);
+    ui.showModalDialog(htmlOutput, 'Redirigiendo a WhatsApp...');
+  }
 }
 
 /**
